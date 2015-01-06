@@ -635,7 +635,7 @@ class Minion(MinionBase):
                     'seconds': opts['master_alive_interval'],
                     'jid_include': True,
                     'maxrunning': 1,
-                    'kwargs': {'master_ip': self.opts['master'],
+                    'kwargs': {'master': self.opts['master'],
                                'connected': True}
                 }
             })
@@ -1521,6 +1521,110 @@ class Minion(MinionBase):
                 except (ValueError, NameError):
                     pass
 
+    def handle_event(self, package):
+        '''
+        Handle an event from the epull_sock (all local minion events)
+        '''
+        log.debug('Handling event {0!r}'.format(package))
+        if package.startswith('module_refresh'):
+            self.module_refresh()
+        elif package.startswith('pillar_refresh'):
+            self.pillar_refresh()
+        elif package.startswith('manage_schedule'):
+            self.manage_schedule(package)
+        elif package.startswith('grains_refresh'):
+            if self.grains_cache != self.opts['grains']:
+                self.pillar_refresh(force_refresh=True)
+                self.grains_cache = self.opts['grains']
+        elif package.startswith('environ_setenv'):
+            self.environ_setenv(package)
+        elif package.startswith('_minion_mine'):
+            self._mine_send(package)
+        elif package.startswith('fire_master'):
+            tag, data = salt.utils.event.MinionEvent.unpack(package)
+            log.debug('Forwarding master event tag={tag}'.format(tag=data['tag']))
+            self._fire_master(data['data'], data['tag'], data['events'], data['pretag'])
+        elif package.startswith('__master_disconnected'):
+            tag, data = salt.utils.event.MinionEvent.unpack(package)
+            # if the master disconnect event is for a different master, raise an exception
+            if data['master'] != self.opts['master']:
+                raise Exception()
+            if self.connected:
+                # we are not connected anymore
+                self.connected = False
+                # modify the scheduled job to fire only on reconnect
+                schedule = {
+                   'function': 'status.master',
+                   'seconds': self.opts['master_alive_interval'],
+                   'jid_include': True,
+                   'maxrunning': 2,
+                   'kwargs': {'master': self.opts['master'],
+                              'connected': False}
+                }
+                self.schedule.modify_job(name='__master_alive',
+                                         schedule=schedule)
+
+                log.info('Connection to master {0} lost'.format(self.opts['master']))
+
+                if self.opts['master_type'] == 'failover':
+                    log.info('Trying to tune in to next master from master-list')
+
+                    # if eval_master finds a new master for us, self.connected
+                    # will be True again on successfull master authentication
+                    self.opts['master'] = self.eval_master(opts=self.opts,
+                                                           failed=True)
+                    if self.connected:
+                        # re-init the subsystems to work with the new master
+                        log.info('Re-initialising subsystems for new '
+                                 'master {0}'.format(self.opts['master']))
+                        del self.socket
+                        del self.context
+                        del self.poller
+                        self._init_context_and_poller()
+                        self.socket = self.context.socket(zmq.SUB)
+                        self._set_reconnect_ivl()
+                        self._setsockopts()
+                        self.socket.connect(self.master_pub)
+                        self.poller.register(self.socket, zmq.POLLIN)
+                        self.poller.register(self.epull_sock, zmq.POLLIN)
+                        self._fire_master_minion_start()
+                        log.info('Minion is ready to receive requests!')
+
+                        # update scheduled job to run with the new master addr
+                        schedule = {
+                           'function': 'status.master',
+                           'seconds': self.opts['master_alive_interval'],
+                           'jid_include': True,
+                           'maxrunning': 2,
+                           'kwargs': {'master': self.opts['master'],
+                                      'connected': True}
+                        }
+                        self.schedule.modify_job(name='__master_alive',
+                                                 schedule=schedule)
+
+        elif package.startswith('__master_connected'):
+            # handle this event only once. otherwise it will pollute the log
+            if not self.connected:
+                log.info('Connection to master {0} re-established'.format(self.opts['master']))
+                self.connected = True
+                # modify the __master_alive job to only fire,
+                # if the connection is lost again
+                schedule = {
+                   'function': 'status.master',
+                   'seconds': self.opts['master_alive_interval'],
+                   'jid_include': True,
+                   'maxrunning': 2,
+                   'kwargs': {'master': self.opts['master'],
+                              'connected': True}
+                }
+
+                self.schedule.modify_job(name='__master_alive',
+                                         schedule=schedule)
+        elif package.startswith('_salt_error'):
+            tag, data = salt.utils.event.MinionEvent.unpack(package)
+            log.debug('Forwarding salt error event tag={tag}'.format(tag=tag))
+            self._fire_master(data, tag)
+
     # Main Minion Tune In
     def tune_in(self):
         '''
@@ -1631,7 +1735,7 @@ class Minion(MinionBase):
                                    'seconds': self.opts['master_alive_interval'],
                                    'jid_include': True,
                                    'maxrunning': 2,
-                                   'kwargs': {'master_ip': self.opts['master'],
+                                   'kwargs': {'master': self.opts['master'],
                                               'connected': False}
                                 }
                                 self.schedule.modify_job(name='__master_alive',
@@ -1669,7 +1773,7 @@ class Minion(MinionBase):
                                            'seconds': self.opts['master_alive_interval'],
                                            'jid_include': True,
                                            'maxrunning': 2,
-                                           'kwargs': {'master_ip': self.opts['master'],
+                                           'kwargs': {'master': self.opts['master'],
                                                       'connected': True}
                                         }
                                         self.schedule.modify_job(name='__master_alive',
@@ -1687,7 +1791,7 @@ class Minion(MinionBase):
                                    'seconds': self.opts['master_alive_interval'],
                                    'jid_include': True,
                                    'maxrunning': 2,
-                                   'kwargs': {'master_ip': self.opts['master'],
+                                   'kwargs': {'master': self.opts['master'],
                                               'connected': True}
                                 }
 
