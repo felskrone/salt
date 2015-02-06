@@ -2,7 +2,7 @@
 '''
 Saltstack Keystore implementation in Mysql, v 0.1
 
-Its relies on a flat table of minions:
+It relies on a flat table of minions for ease of use.
 
 mysql> show create table minions\G
 *************************** 1. row ***************************
@@ -58,11 +58,11 @@ log = logging.getLogger(__name__)
 # enabled with debugging. This map translates SQL-errors
 # into pretty error-messages.
 error_map = {
-    0000: 'Generic error',
-    # duplicate primary key, minion already exists
+    # Generic error
+    0000: 'There was an error during a mysql-operation',
+    # Duplicate primary key, minion already exists
     1062: 'Minion {0} already exists in database',
-
-    # syntax error
+    # Syntax error in query
     1064: 'Failed to add minion, mysql reported a syntax error'
 }
 
@@ -95,7 +95,7 @@ def compat(func):
 
 class Mysql_key(salt.key.Key):
 
-    # the four states a minion can be in in mysql
+    # The four states a minion can be in
     ACC = 'acc'
     PEND = 'pre'
     REJ = 'rej'
@@ -140,7 +140,7 @@ class Mysql_key(salt.key.Key):
     def run_query(self, qry):
         '''
         Execute an MySQL-Query, catch possible errors and
-        return data or error messages.
+        return data or error message.
 
         # We always return a tuple with two items:
         # Item 0 represents query success with True and False
@@ -213,6 +213,7 @@ class Mysql_key(salt.key.Key):
         Accept a dictionary of keys and return the current state of the
         specified keys
         '''
+        log.error('dict_match is not yet implemented')
         return {}
 
     def add_key(self, minion_id, minion_key, key_type, key_state='pre'):
