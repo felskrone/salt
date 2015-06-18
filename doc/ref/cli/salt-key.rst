@@ -15,6 +15,35 @@ Description
 Salt-key executes simple management of Salt server public keys used for
 authentication.
 
+
+Key States
+==========
+Minion-Keys on a master have four states they can be in.
+
+Pre
+A minion has sent its public key to the master and the key was placed in
+'minions_pre'. It has to be accepted to allow the minion to
+authenticate.
+
+Accepted
+A minion-key was accepted and moved from 'minions_pre' to 'minions'. All
+accepted minions are allowed to authenticate and retrieve their states,
+files, etc. from the master.
+
+Rejected
+To disallow specific minions to authenticate, their keys can be moved into
+'minions_rejected' and the master will deny their authentication attempts.
+
+Denied
+If a minion was denied by the master due to a key-mismatch, the key sent
+by the minion will be placed in 'minions_denied' while leaving the key in
+'minions' untouched. This may happen when reinstalling a minion without
+saving the old key-pair or when multiple minions have the same minions-id.
+
+This has to be resolved manually as is not possible for the master to know,
+which of the two keys the correct one is.
+
+
 Options
 =======
 
